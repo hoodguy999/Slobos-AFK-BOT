@@ -4,6 +4,7 @@ const { GoalBlock } = goals;
 const config = require('./settings.json');
 const express = require('express');
 const http = require('http');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 
 // ============================================================
 // EXPRESS SERVER - Keep Render/Aternos alive
@@ -272,6 +273,64 @@ app.get('/ping', (req, res) => res.send('pong'));
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[Server] HTTP server started on port ${PORT}`);
 });
+
+// ============================================================
+// DISCORD BOT - /msg command to message all players in MC
+// ============================================================
+const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
+
+if (DISCORD_BOT_TOKEN) {
+  const discordClient = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+  discordClient.once('ready', async () => {
+    console.log(`[Discord] Logged in as ${discordClient.user.tag}`);
+
+    const command = new SlashCommandBuilder()
+      .setName('msg')
+      .setDescription('Send a message to all players on the Minecraft server')
+      .addStringOption(option =>
+        option.setName('message')
+          .setDescription('The message to send')
+          .setRequired(true)
+      );
+
+    const rest = new REST({ version: '10' }).setToken(DISCORD_BOT_TOKEN);
+    try {
+      await rest.put(
+        Routes.applicationCommands(discordClient.user.id),
+        { body: [command.toJSON()] }
+      );
+      console.log('[Discord] /msg slash command registered globally');
+    } catch (err) {
+      console.error('[Discord] Failed to register slash command:', err.message);
+    }
+  });
+
+  discordClient.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand() || interaction.commandName !== 'msg') return;
+
+    const message = interaction.options.getString('message');
+
+    if (!bot || !botState.connected) {
+      await interaction.reply({ content: 'Bot is not connected to Minecraft right now.', ephemeral: true });
+      return;
+    }
+
+    try {
+      bot.chat(`/msg @a ${message}`);
+      await interaction.reply({ content: `Sent to Minecraft: \`/msg @a ${message}\``, ephemeral: true });
+      console.log(`[Discord] /msg used: ${message}`);
+    } catch (err) {
+      await interaction.reply({ content: `Failed to send message: ${err.message}`, ephemeral: true });
+    }
+  });
+
+  discordClient.login(DISCORD_BOT_TOKEN).catch(err => {
+    console.error('[Discord] Login failed:', err.message);
+  });
+} else {
+  console.log('[Discord] No DISCORD_BOT_TOKEN set, skipping Discord bot.');
+}
 
 function formatUptime(seconds) {
   const h = Math.floor(seconds / 3600);
